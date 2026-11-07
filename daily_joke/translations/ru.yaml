@@ -7,7 +7,7 @@ configuration:
     description: Отдельный ключ Tooken Club. Нужен только для provider=tooken; ключ Remnawave остаётся в api_key.
   tooken_model:
     name: Модель Tooken Club
-    description: Начальный вариант gemini-3.8-flash. Можно указать другой ID с поддержкой Chat Completions из кабинета или /v1/models.
+    description: Начальный вариант gpt-6.1-terra; для сравнения gpt-6.1-sol. GPT используют Responses, остальные модели — Chat Completions. ID берите из кабинета или /v1/models.
   panel_url:
     name: Адрес панели или секретная ссылка
     description: HTTPS-адрес своей панели. Можно вставить ссылку /auth/login?ключ=значение, чтобы получить cookie.

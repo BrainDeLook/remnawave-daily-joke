@@ -1,3 +1,9 @@
+## 0.1.5
+
+- Добавлен Responses API для GPT-моделей, включая Terra и Sol, с разбором текстовых блоков и usage.
+- Terra — начальная облачная модель с reasoning=none; Sol и другие GPT используют low. Лимит Responses — 1024 токена вместе с рассуждениями.
+- Gemini, Claude, DeepSeek и остальные модели сохраняют маршрут Chat Completions. Выбор модели доступен через tooken_model.
+
 ## 0.1.4
 
 - Добавлен Tooken Club через Chat Completions: отдельный ключ и настраиваемый ID модели, начальный вариант Gemini 3.8 Flash.

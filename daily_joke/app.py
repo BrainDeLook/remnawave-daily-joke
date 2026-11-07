@@ -240,32 +240,65 @@ class TookenGenerator(Generator):
         messages[0]["content"] += (
             " Перед ответом продумай несколько вариантов и выбери наиболее связный "
             "и удачный. Покажи только один итоговый анекдот, без рассуждений и списка вариантов.")
-        response = http_json(self.opener, "https://tooken.club/v1/chat/completions", "POST", {
-            "model": self.config["tooken_model"], "messages": messages,
-            "stream": False, "max_tokens": 512, "temperature": 0.8,
-        }, {"Authorization": "Bearer " + self.config["tooken_api_key"]}, timeout=180)
+        model = self.config["tooken_model"]
+        responses_api = model.startswith("gpt-")
+        if responses_api:
+            endpoint = "responses"
+            body = {"model": model, "input": messages, "stream": False, "store": False,
+                    "max_output_tokens": 1024,
+                    "reasoning": {"effort": "none" if model == "gpt-6.1-terra" else "low"}}
+            usage_keys = ("input_tokens", "output_tokens")
+        else:
+            endpoint = "chat/completions"
+            body = {"model": model, "messages": messages, "stream": False,
+                    "max_tokens": 512, "temperature": 0.8}
+            usage_keys = ("prompt_tokens", "completion_tokens")
+        response = http_json(self.opener, "https://tooken.club/v1/" + endpoint, "POST", body,
+                             {"Authorization": "Bearer " + self.config["tooken_api_key"]}, timeout=180)
         usage = response.get("usage")
         if usage is not None:
             if not isinstance(usage, dict) or any(
                     type(usage.get(key)) is not int or usage[key] < 0
-                    for key in ("prompt_tokens", "completion_tokens")):
+                    for key in usage_keys):
                 raise SafeError("Invalid Tooken usage response; check dashboard for billed tokens")
-            self.usage = {"input": usage["prompt_tokens"], "output": usage["completion_tokens"]}
+            self.usage = {"input": usage[usage_keys[0]], "output": usage[usage_keys[1]]}
             LOG.info("Tooken usage: input=%s output=%s total=%s model=%s",
                      self.usage["input"], self.usage["output"], sum(self.usage.values()),
                      self.config["tooken_model"])
         else:
             LOG.info("Tooken returned no usage; check dashboard for billed tokens")
-        choices = response.get("choices")
-        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-            raise SafeError("Invalid Tooken choices response; old announce retained")
-        choice = choices[0]
-        message = choice.get("message")
-        if not isinstance(message, dict) or not isinstance(message.get("content"), str):
-            raise SafeError("Tooken returned no text; old announce retained")
-        if choice.get("finish_reason") != "stop":
-            raise SafeError("Tooken response incomplete or refused; old announce retained")
-        joke = valid_joke(message["content"], self.config["examples"], history, self.config["max_chars"])
+        if responses_api:
+            if response.get("status") != "completed":
+                raise SafeError("Tooken response incomplete or failed; old announce retained")
+            output = response.get("output")
+            if not isinstance(output, list):
+                raise SafeError("Invalid Tooken output; old announce retained")
+            parts = []
+            for item in output:
+                if not isinstance(item, dict):
+                    raise SafeError("Invalid Tooken output item; old announce retained")
+                if item.get("type") != "message":
+                    continue
+                content = item.get("content")
+                if not isinstance(content, list):
+                    raise SafeError("Invalid Tooken message content; old announce retained")
+                for part in content:
+                    if not isinstance(part, dict) or part.get("type") != "output_text" or not isinstance(part.get("text"), str):
+                        raise SafeError("Tooken refused or returned non-text output; old announce retained")
+                    parts.append(part["text"])
+            text = "\n".join(parts)
+        else:
+            choices = response.get("choices")
+            if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+                raise SafeError("Invalid Tooken choices response; old announce retained")
+            choice = choices[0]
+            message = choice.get("message")
+            if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+                raise SafeError("Tooken returned no text; old announce retained")
+            if choice.get("finish_reason") != "stop":
+                raise SafeError("Tooken response incomplete or refused; old announce retained")
+            text = message["content"]
+        joke = valid_joke(text, self.config["examples"], history, self.config["max_chars"])
         if joke is None:
             raise SafeError("Tooken returned invalid or repeated joke; old announce retained")
         return joke

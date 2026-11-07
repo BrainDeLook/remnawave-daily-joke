@@ -1,7 +1,7 @@
 {
   "provider": "local",
   "tooken_api_key": "",
-  "tooken_model": "gemini-3.8-flash",
+  "tooken_model": "gpt-6.1-terra",
   "panel_url": "https://panel.example.com/auth/login?YOUR_ACCESS_KEY=YOUR_ACCESS_VALUE",
   "api_key": "REPLACE_WITH_REMNAWAVE_API_KEY",
   "cookie": "",

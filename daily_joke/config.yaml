@@ -1,5 +1,5 @@
 name: Remnawave Daily Joke
-version: "0.1.4"
+version: "0.1.5"
 image: ghcr.io/braindelook/remnawave-daily-joke-{arch}
 slug: remnawave_daily_joke
 description: Daily AI jokes in Remnawave via local models or Tooken Club API
@@ -16,7 +16,7 @@ panel_icon: mdi:emoticon-happy-outline
 options:
   provider: local
   tooken_api_key: ""
-  tooken_model: "gemini-3.8-flash"
+  tooken_model: "gpt-6.1-terra"
   panel_url: ""
   api_key: ""
   cookie: ""

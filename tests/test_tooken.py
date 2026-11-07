@@ -59,6 +59,39 @@ class TookenTests(unittest.TestCase):
         self.assertTrue(generator.generate([]))
         self.assertIsNone(generator.usage)
 
+    def test_gpt_models_use_responses_without_temperature(self):
+        for model, effort in [("gpt-6.1-terra", "none"), ("gpt-6.1-sol", "low")]:
+            payload = {"status": "completed", "usage": {"input_tokens": 1500, "output_tokens": 150},
+                       "output": [{"type": "reasoning", "summary": []},
+                                  {"type": "message", "content": [{"type": "output_text", "text": "Новый анекдот на русском"}]}]}
+            generator, opener = self.generator(payload)
+            generator.config["tooken_model"] = model
+            with self.subTest(model=model):
+                self.assertEqual(generator.generate([]), "Новый анекдот на русском")
+                request, = opener.requests
+                self.assertEqual(request.full_url, "https://tooken.club/v1/responses")
+                body = json.loads(request.data)
+                self.assertNotIn("temperature", body)
+                self.assertNotIn("max_tokens", body)
+                self.assertEqual(body["max_output_tokens"], 1024)
+                self.assertEqual(body["reasoning"]["effort"], effort)
+                self.assertFalse(body["store"])
+                self.assertEqual(generator.usage, {"input": 1500, "output": 150})
+
+    def test_responses_rejects_partial_refused_and_malformed_content(self):
+        for payload in [
+            {"status": "incomplete", "output": []},
+            {"status": "completed", "output": []},
+            {"status": "completed", "output": [None]},
+            {"status": "completed", "output": [{"type": "message", "content": None}]},
+            {"status": "completed", "output": [{"type": "message", "content": [{"type": "refusal", "refusal": "No"}]}]},
+        ]:
+            generator, opener = self.generator(payload)
+            generator.config["tooken_model"] = "gpt-6.1-terra"
+            with self.subTest(payload=payload), self.assertRaises(app.SafeError):
+                generator.generate([])
+            self.assertEqual(len(opener.requests), 1)
+
     def test_main_api_mode_never_starts_ollama(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as directory:
             config = configuration(provider="tooken", tooken_api_key="test", tooken_model="gemini-3.8-flash")
