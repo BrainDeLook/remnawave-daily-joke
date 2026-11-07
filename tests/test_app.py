@@ -197,9 +197,43 @@ class JokeTests(unittest.TestCase):
             {"message": {"content": "English"}},
             {"message": {"content": "Пример старого анекдота!"}},
             {"message": {"content": "Совсем новая шутка"}},
+            {"message": {"content": '{"choice": 1}'}},
         ]) as call:
             self.assertEqual(generator.generate([]), "Совсем новая шутка")
-        self.assertEqual(call.call_count, 3)
+        self.assertEqual(call.call_count, 4)
+        for request in call.call_args_list:
+            self.assertEqual(request.args[1]["keep_alive"], 0)
+            self.assertEqual(request.args[1]["options"]["num_ctx"], 4096)
+
+    def test_review_selects_existing_candidate_instead_of_rewriting(self):
+        generator = app.Generator(configuration())
+        with mock.patch.object(generator, "call", side_effect=[
+            {"message": {"content": "Первая новая шутка"}},
+            {"message": {"content": "Вторая новая шутка"}},
+            {"message": {"content": "Третья новая шутка"}},
+            {"message": {"content": '{"choice": 2}'}},
+        ]):
+            self.assertEqual(generator.generate([]), "Вторая новая шутка")
+
+    def test_failed_review_never_returns_unreviewed_text(self):
+        generator = app.Generator(configuration())
+        for content in ['{"choice": 0}', '{"choice": 2}', '{"choice": true}',
+                        '{"choice": "1"}', '[]', 'broken JSON']:
+            with self.subTest(content=content):
+                with mock.patch.object(generator, "call", return_value={"message": {"content": content}}):
+                    with self.assertRaises(app.SafeError):
+                        generator.choose(["Русская шутка"])
+
+    def test_model_envelope_is_validated_and_truncation_rejected(self):
+        generator = app.Generator(configuration())
+        for response in [{}, {"message": []}, {"message": {"content": 42}}]:
+            with self.subTest(response=response):
+                with mock.patch.object(generator, "call", return_value=response):
+                    with self.assertRaises(app.SafeError):
+                        generator.chat([], 0.8)
+        with mock.patch.object(generator, "call", return_value={
+            "message": {"content": "Незавершённая история"}, "done_reason": "length"}):
+            self.assertEqual(generator.chat([], 0.8), "")
 
     def test_generator_stops_after_three_invalid_responses(self):
         generator = app.Generator(configuration())
