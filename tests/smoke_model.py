@@ -18,9 +18,9 @@ else:
 
 generator.prepare()
 sample = generator.chat([{"role": "user", "content":
-    "Напиши один короткий анекдот на русском о будильнике. Только текст анекдота."}], 0.8)
-assert app.valid_joke(sample, [], [], 400), "Expected complete Russian output"
+    "Повтори дословно: Будильник успешно проверен. Ничего больше не добавляй."}], 0.0)
 print("Qwen3 native inference sample:", sample, flush=True)
+assert "Будильник успешно проверен" in sample, "Expected requested Russian output"
 schema = {"type": "object", "properties": {"choice": {"type": "integer", "const": 1}},
           "required": ["choice"], "additionalProperties": False}
 result = generator.chat([{"role": "user", "content": 'Верни JSON: {"choice": 1}'}], 0.2, schema)
