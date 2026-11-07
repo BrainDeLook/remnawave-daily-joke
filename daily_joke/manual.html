@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Remnawave Daily Joke</title>
+<style>
+body{font:17px system-ui,sans-serif;max-width:660px;margin:40px auto;padding:0 20px;background:#101820;color:#f2f5f8}
+h1{font-size:28px}p{line-height:1.6}button{font:inherit;background:#6dd8c4;border:0;border-radius:10px;padding:14px 20px;cursor:pointer}button:disabled{opacity:.45;cursor:wait}pre{white-space:pre-wrap;font:inherit;line-height:1.6;background:#1c2935;padding:20px;border-radius:12px}
+</style>
+<h1>Remnawave Daily Joke</h1>
+<p id="mode">Подключение…</p>
+<button id="run" disabled>Запустить сейчас</button>
+<pre id="status" role="status">Загрузка состояния…</pre>
+<p>Ручной запуск работает независимо от времени и сегодняшнего запуска.
+После успешного выполнения автоматический запуск сегодня пропускается.
+Повторно нажать кнопку можно после завершения генерации.</p>
+<script>
+const button = document.getElementById('run');
+const statusText = document.getElementById('status');
+let token = '';
+let dryRun = true;
+async function refresh() {
+  const response = await fetch('status', {cache:'no-store'});
+  if (!response.ok) throw new Error('Не удалось получить состояние');
+  const state = await response.json();
+  token = state.token;
+  dryRun = state.dry_run;
+  button.disabled = state.disabled;
+  button.textContent = state.dry_run ? 'Сгенерировать предпросмотр' : 'Сгенерировать и опубликовать';
+  document.getElementById('mode').textContent = state.dry_run
+    ? 'Предпросмотр: анекдот появится здесь и в журнале. Панель не изменится.'
+    : 'Публикация включена: анекдот будет записан в анонс Remnawave.';
+  statusText.textContent = state.message;
+}
+button.onclick = async () => {
+  button.disabled = true;
+  if (!dryRun &&
+      !confirm('Сгенерировать новый анекдот и заменить анонс в Remnawave?')) {
+    await refresh(); return;
+  }
+  const response = await fetch('run', {method:'POST', headers:{'X-Run-Token':token}});
+  if (!response.ok && response.status !== 409) throw new Error('Запуск не принят');
+  await refresh();
+};
+function offline(error) { button.disabled = true; statusText.textContent = 'Нет связи с дополнением. ' + error.message; }
+window.addEventListener('unhandledrejection', event => offline(event.reason));
+refresh().catch(offline);
+setInterval(() => refresh().catch(offline), 3000);
+</script>
+</html>

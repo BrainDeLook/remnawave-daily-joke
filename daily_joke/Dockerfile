@@ -6,5 +6,6 @@ COPY --from=ollama /bin/ollama /bin/ollama
 COPY --from=ollama /usr/lib/ollama /usr/lib/ollama
 WORKDIR /app
 COPY app.py /app/app.py
+COPY manual.py manual.html /app/
 ENV PYTHONUNBUFFERED=1
 CMD ["python", "/app/app.py"]

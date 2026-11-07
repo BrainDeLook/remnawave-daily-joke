@@ -1,5 +1,5 @@
 name: Remnawave Daily Joke
-version: "0.1.1"
+version: "0.1.2"
 image: ghcr.io/braindelook/remnawave-daily-joke-{arch}
 slug: remnawave_daily_joke
 description: Local AI jokes in your Remnawave subscription announce, once a day
@@ -10,6 +10,9 @@ arch:
 startup: application
 boot: auto
 init: false
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:emoticon-happy-outline
 options:
   panel_url: ""
   api_key: ""

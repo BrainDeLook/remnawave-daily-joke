@@ -8,12 +8,18 @@ import random
 import re
 import signal
 import subprocess
+import threading
 import time
 import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
 from zoneinfo import ZoneInfo
+
+if __package__:
+    from .manual import ManualControl, ManualServer
+else:
+    from manual import ManualControl, ManualServer
 
 LOG = logging.getLogger("daily-joke")
 OLLAMA = "http://127.0.0.1:11434"
@@ -209,7 +215,7 @@ def run_once(config, generator, state, state_path):
         LOG.info("PREVIEW (dry_run): %s", joke)
         state["last_date"] = today
         save_json(state_path, state)
-        return
+        return joke
     # Persist the joke before PATCH so a restart/retry reuses the same content.
     state["pending"] = {"date": today, "text": joke}
     save_json(state_path, state)
@@ -221,6 +227,7 @@ def run_once(config, generator, state, state_path):
     state.pop("pending", None)
     save_json(state_path, state)
     LOG.info("Announce updated and verified")
+    return joke
 
 
 def main():
@@ -230,6 +237,7 @@ def main():
     state_path = data_dir / "state.json"
     process = None
     stopping = False
+    server = None
 
     def stop(signum, frame):
         nonlocal stopping
@@ -241,6 +249,9 @@ def main():
     signal.signal(signal.SIGINT, stop)
     try:
         config = load_config(config_path)
+        control = ManualControl(config["dry_run"])
+        server = ManualServer(("0.0.0.0", 8099), control)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
         state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
         if state.get("dry_run") != config["dry_run"]:
             state.pop("last_date", None)
@@ -262,6 +273,9 @@ def main():
         else:
             raise SafeError("Local model server did not start")
         generator.prepare()
+        with control.lock:
+            control.ready = True
+            control.message = "Готово. Можно запустить генерацию вручную."
         LOG.info("Ready. Schedule %s (%s), dry_run=%s", config["daily_time"],
                  config["timezone"], config["dry_run"])
         retry_at = 0.0
@@ -269,11 +283,16 @@ def main():
             if process.poll() is not None:
                 raise SafeError("Local model server stopped")
             now = dt.datetime.now(ZoneInfo(config["timezone"]))
-            if due(config, state, now) and time.monotonic() >= retry_at:
+            source = control.take(due(config, state, now) and time.monotonic() >= retry_at)
+            if source:
                 try:
-                    run_once(config, generator, state, state_path)
+                    LOG.info("Starting generation (%s)", source)
+                    joke = run_once(config, generator, state, state_path)
+                    control.finish(("Предпросмотр:\n" if config["dry_run"] else "Анонс обновлён:\n") + joke)
+                    retry_at = 0.0
                 except SafeError as exc:
                     LOG.error("%s; retry in 30 minutes", exc)
+                    control.finish(str(exc))
                     retry_at = time.monotonic() + 1800
             time.sleep(5)
     except SafeError as exc:
@@ -284,6 +303,9 @@ def main():
                   type(exc).__name__)
         return 1
     finally:
+        if server is not None:
+            server.shutdown()
+            server.server_close()
         if process is not None and process.poll() is None:
             process.terminate()
             try:
