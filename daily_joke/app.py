@@ -1,4 +1,3 @@
-import base64
 import datetime as dt
 import http.cookiejar
 import json
@@ -97,7 +96,7 @@ class Panel:
     def update(self, settings, joke):
         headers = {key: value for key, value in (settings.get("customResponseHeaders") or {}).items()
                    if key.lower() != "announce"}
-        headers["announce"] = "base64:" + base64.b64encode(joke.encode("utf-8")).decode("ascii")
+        headers["announce"] = "rwEncodeBase64:" + joke
         http_json(self.opener, self.settings_url, "PATCH", {
             "uuid": settings["uuid"], "customResponseHeaders": headers}, self.headers)
         actual = self.get().get("customResponseHeaders") or {}

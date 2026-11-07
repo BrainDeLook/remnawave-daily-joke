@@ -1,4 +1,3 @@
-import base64
 import datetime as dt
 import io
 import json
@@ -42,7 +41,7 @@ class FakeOpener:
 class PanelTests(unittest.TestCase):
     def test_update_preserves_other_headers_uuid_and_utf8(self):
         joke = "Ёжик купил Wi-Fi — теперь весь лес на связи. 🦔"
-        encoded = "base64:" + base64.b64encode(joke.encode("utf-8")).decode("ascii")
+        encoded = "rwEncodeBase64:" + joke
         settings = {
             "uuid": "123e4567-e89b-12d3-a456-426614174000",
             "customResponseHeaders": {"Announce": "old", "ANNOUNCE": "older",
@@ -63,7 +62,7 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(json.loads(patch.data), {
             "uuid": settings["uuid"], "customResponseHeaders": {
                 "announce": encoded, "X-Custom": "оставить", "profile-title": "unchanged"}})
-        self.assertEqual(base64.b64decode(encoded[7:]).decode("utf-8"), joke)
+        self.assertEqual(encoded.removeprefix("rwEncodeBase64:"), joke)
         self.assertEqual(patch.get_header("Authorization"), "Bearer test-token")
         self.assertEqual(patch.get_header("Cookie"), "access=test-cookie")
         self.assertEqual(verify.get_method(), "GET")

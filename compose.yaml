@@ -1,6 +1,6 @@
 services:
   daily-joke:
-    build: ./daily_joke
+    image: ghcr.io/braindelook/remnawave-daily-joke-${ADDON_ARCH:-aarch64}:0.1.1
     restart: unless-stopped
     volumes:
       - ./options.json:/data/options.json:ro
