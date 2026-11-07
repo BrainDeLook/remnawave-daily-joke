@@ -1,0 +1,10 @@
+services:
+  daily-joke:
+    build: ./daily_joke
+    restart: unless-stopped
+    volumes:
+      - ./options.json:/data/options.json:ro
+      - joke-data:/data
+    cpus: 2.0
+volumes:
+  joke-data:

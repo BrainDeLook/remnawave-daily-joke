@@ -1,0 +1,14 @@
+{
+  "panel_url": "https://panel.example.com/auth/login?YOUR_ACCESS_KEY=YOUR_ACCESS_VALUE",
+  "api_key": "REPLACE_WITH_REMNAWAVE_API_KEY",
+  "cookie": "",
+  "model": "qwen2.5:1.5b",
+  "daily_time": "09:00",
+  "timezone": "Europe/Moscow",
+  "max_chars": 400,
+  "dry_run": true,
+  "examples": [
+    "— Почему программист не любит природу? — Слишком много багов.",
+    "Купил умную лампочку. Теперь, чтобы посидеть в темноте, приходится обновлять прошивку."
+  ]
+}
