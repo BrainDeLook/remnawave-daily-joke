@@ -6,10 +6,12 @@ import threading
 
 
 class ManualControl:
-    def __init__(self, dry_run):
+    def __init__(self, dry_run, provider="local", model=""):
         self.lock = threading.Lock()
         self.token = secrets.token_urlsafe(32)
         self.dry_run = dry_run
+        self.provider = provider
+        self.model = model
         self.ready = False
         self.requested = False
         self.busy = False
@@ -40,7 +42,8 @@ class ManualControl:
 
     def snapshot(self):
         with self.lock:
-            return {"dry_run": self.dry_run, "disabled": not self.ready or self.busy or self.requested,
+            return {"dry_run": self.dry_run, "provider": self.provider, "model": self.model,
+                    "disabled": not self.ready or self.busy or self.requested,
                     "message": self.message, "token": self.token}
 
 

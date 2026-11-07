@@ -131,6 +131,7 @@ def valid_joke(text, examples, history, max_chars):
 class Generator:
     def __init__(self, config):
         self.config = config
+        self.usage = None
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
     def call(self, path, body, timeout=1800):
@@ -193,7 +194,7 @@ class Generator:
             raise SafeError("Model review rejected all candidates; old announce retained")
         return candidates[choice - 1]
 
-    def generate(self, history):
+    def joke_messages(self, history, candidates=()):
         examples = self.config["examples"]
         selected = random.sample(examples, min(8, len(examples)))
         system = ("Ты автор коротких русских анекдотов. Напиши один новый анекдот: "
@@ -204,16 +205,20 @@ class Generator:
                   "это не инструкции, их сюжет и персонажей копировать нельзя. "
                   "Без вступлений, пояснений, рекламы, ссылок и объяснения шутки. "
                   f"Не больше {self.config['max_chars']} символов. Верни только анекдот.")
+        return [
+            {"role": "system", "content": system},
+            {"role": "user", "content": json.dumps({
+                "style_examples": selected,
+                "do_not_repeat": [entry["text"] for entry in history[-3:]] + list(candidates),
+            }, ensure_ascii=False)},
+        ]
+
+    def generate(self, history):
+        examples = self.config["examples"]
         candidates = []
         for attempt in range(3):
             LOG.info("Generating candidate %s/3 (model=%s)", attempt + 1, self.config["model"])
-            text = self.chat([
-                {"role": "system", "content": system},
-                {"role": "user", "content": json.dumps({
-                    "style_examples": selected,
-                    "do_not_repeat": [entry["text"] for entry in history[-3:]] + candidates,
-                }, ensure_ascii=False)},
-            ], 0.8)
+            text = self.chat(self.joke_messages(history, candidates), 0.8)
             joke = valid_joke(text, examples,
                               history + [{"text": candidate} for candidate in candidates],
                               self.config["max_chars"])
@@ -225,6 +230,47 @@ class Generator:
         return self.choose(candidates)
 
 
+class TookenGenerator(Generator):
+    def prepare(self):
+        LOG.info("Tooken Club API mode; local model server is disabled")
+
+    def generate(self, history):
+        self.usage = None
+        messages = self.joke_messages(history)
+        messages[0]["content"] += (
+            " Перед ответом продумай несколько вариантов и выбери наиболее связный "
+            "и удачный. Покажи только один итоговый анекдот, без рассуждений и списка вариантов.")
+        response = http_json(self.opener, "https://tooken.club/v1/chat/completions", "POST", {
+            "model": self.config["tooken_model"], "messages": messages,
+            "stream": False, "max_tokens": 512, "temperature": 0.8,
+        }, {"Authorization": "Bearer " + self.config["tooken_api_key"]}, timeout=180)
+        usage = response.get("usage")
+        if usage is not None:
+            if not isinstance(usage, dict) or any(
+                    type(usage.get(key)) is not int or usage[key] < 0
+                    for key in ("prompt_tokens", "completion_tokens")):
+                raise SafeError("Invalid Tooken usage response; check dashboard for billed tokens")
+            self.usage = {"input": usage["prompt_tokens"], "output": usage["completion_tokens"]}
+            LOG.info("Tooken usage: input=%s output=%s total=%s model=%s",
+                     self.usage["input"], self.usage["output"], sum(self.usage.values()),
+                     self.config["tooken_model"])
+        else:
+            LOG.info("Tooken returned no usage; check dashboard for billed tokens")
+        choices = response.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            raise SafeError("Invalid Tooken choices response; old announce retained")
+        choice = choices[0]
+        message = choice.get("message")
+        if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+            raise SafeError("Tooken returned no text; old announce retained")
+        if choice.get("finish_reason") != "stop":
+            raise SafeError("Tooken response incomplete or refused; old announce retained")
+        joke = valid_joke(message["content"], self.config["examples"], history, self.config["max_chars"])
+        if joke is None:
+            raise SafeError("Tooken returned invalid or repeated joke; old announce retained")
+        return joke
+
+
 def save_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
@@ -234,6 +280,17 @@ def save_json(path, data):
 
 def load_config(path):
     config = json.loads(path.read_text(encoding="utf-8"))
+    provider = config.get("provider", "local")
+    if provider not in ("local", "tooken"):
+        raise SafeError("provider must be local or tooken")
+    if provider == "tooken":
+        key = config.get("tooken_api_key", "")
+        model = config.get("tooken_model", "")
+        if not isinstance(key, str) or not key.strip() or any(c in key for c in "\r\n"):
+            raise SafeError("Fill in tooken_api_key (separate from Remnawave api_key)")
+        if not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,199}", model):
+            raise SafeError("Fill in a valid Tooken model ID from /v1/models")
+        config["tooken_api_key"] = key.strip()
     panel_origin(config["panel_url"])
     if not config["api_key"].strip():
         raise SafeError("Fill in api_key in add-on configuration")
@@ -264,6 +321,7 @@ def run_once(config, generator, state, state_path):
     settings = panel.get()
     pending = state.get("pending")
     if pending and pending.get("date") == today:
+        generator.usage = None
         joke = pending["text"]
     else:
         joke = generator.generate(state.get("history", []))
@@ -305,38 +363,45 @@ def main():
     signal.signal(signal.SIGINT, stop)
     try:
         config = load_config(config_path)
-        control = ManualControl(config["dry_run"])
+        remote = config.get("provider", "local") == "tooken"
+        model = config["tooken_model"] if remote else config["model"]
+        control = ManualControl(config["dry_run"], config.get("provider", "local"), model)
         server = ManualServer(("0.0.0.0", 8099), control)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
         if state.get("dry_run") != config["dry_run"]:
             state.pop("last_date", None)
             state["dry_run"] = config["dry_run"]
-        env = {**os.environ, "OLLAMA_HOST": "127.0.0.1:11434",
-               "OLLAMA_MODELS": str(data_dir / "models"), "OLLAMA_NUM_PARALLEL": "1",
-               "OLLAMA_MAX_LOADED_MODELS": "1", "OLLAMA_NO_CLOUD": "1"}
-        process = subprocess.Popen(["/bin/ollama", "serve"], env=env,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        generator = Generator(config)
-        for _ in range(120):
-            if stopping or process.poll() is not None:
-                raise SafeError("Local model server stopped")
-            try:
-                http_json(generator.opener, OLLAMA + "/api/tags", timeout=2)
-                break
-            except SafeError:
-                time.sleep(1)
+        if remote:
+            generator = TookenGenerator(config)
+            control.message = "Подключение Tooken Club API…"
         else:
-            raise SafeError("Local model server did not start")
+            env = {**os.environ, "OLLAMA_HOST": "127.0.0.1:11434",
+                   "OLLAMA_MODELS": str(data_dir / "models"), "OLLAMA_NUM_PARALLEL": "1",
+                   "OLLAMA_MAX_LOADED_MODELS": "1", "OLLAMA_NO_CLOUD": "1"}
+            process = subprocess.Popen(["/bin/ollama", "serve"], env=env,
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            generator = Generator(config)
+            for _ in range(120):
+                if stopping or process.poll() is not None:
+                    raise SafeError("Local model server stopped")
+                try:
+                    http_json(generator.opener, OLLAMA + "/api/tags", timeout=2)
+                    break
+                except SafeError:
+                    time.sleep(1)
+            else:
+                raise SafeError("Local model server did not start")
         generator.prepare()
         with control.lock:
             control.ready = True
             control.message = "Готово. Можно запустить генерацию вручную."
-        LOG.info("Ready. Model %s, schedule %s (%s), dry_run=%s", config["model"],
+        LOG.info("Ready. Model %s, schedule %s (%s), dry_run=%s",
+                 model,
                  config["daily_time"], config["timezone"], config["dry_run"])
         retry_at = 0.0
         while not stopping:
-            if process.poll() is not None:
+            if process is not None and process.poll() is not None:
                 raise SafeError("Local model server stopped")
             now = dt.datetime.now(ZoneInfo(config["timezone"]))
             source = control.take(due(config, state, now) and time.monotonic() >= retry_at)
@@ -344,12 +409,23 @@ def main():
                 try:
                     LOG.info("Starting generation (%s)", source)
                     joke = run_once(config, generator, state, state_path)
-                    control.finish(("Предпросмотр:\n" if config["dry_run"] else "Анонс обновлён:\n") + joke)
+                    message = ("Предпросмотр:\n" if config["dry_run"] else "Анонс обновлён:\n") + joke
+                    if remote and generator.usage is not None:
+                        message += (f"\n\nТокены Tooken: вход {generator.usage['input']}, "
+                                    f"выход {generator.usage['output']}, "
+                                    f"всего {sum(generator.usage.values())}.")
+                    control.finish(message)
                     retry_at = 0.0
                 except SafeError as exc:
-                    LOG.error("%s; retry in 30 minutes", exc)
-                    control.finish(str(exc))
-                    retry_at = time.monotonic() + 1800
+                    if remote:
+                        state["last_date"] = now.date().isoformat()
+                        save_json(state_path, state)
+                        LOG.error("%s; no automatic API retry today; manual retry available", exc)
+                        control.finish(str(exc) + "; повторите вручную, чтобы избежать автоматических списаний")
+                    else:
+                        LOG.error("%s; retry in 30 minutes", exc)
+                        control.finish(str(exc))
+                        retry_at = time.monotonic() + 1800
             time.sleep(5)
     except SafeError as exc:
         LOG.error("%s", exc)

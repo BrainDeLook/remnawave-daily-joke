@@ -30,6 +30,9 @@ async function refresh() {
   document.getElementById('mode').textContent = state.dry_run
     ? 'Предпросмотр: анекдот появится здесь и в журнале. Панель не изменится.'
     : 'Публикация включена: анекдот будет записан в анонс Remnawave.';
+  document.getElementById('mode').textContent += state.provider === 'tooken'
+    ? ' Tooken Club: ' + state.model + '. Каждый запуск — платный API-запрос, включая предпросмотр.'
+    : ' Локальная модель: ' + state.model + '.';
   statusText.textContent = state.message;
 }
 button.onclick = async () => {

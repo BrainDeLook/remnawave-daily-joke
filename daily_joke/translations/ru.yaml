@@ -1,4 +1,13 @@
 configuration:
+  provider:
+    name: Способ генерации
+    description: local — локальная модель; tooken — платный Tooken Club API без запуска Ollama. После смены перезапустите дополнение.
+  tooken_api_key:
+    name: API-ключ Tooken Club
+    description: Отдельный ключ Tooken Club. Нужен только для provider=tooken; ключ Remnawave остаётся в api_key.
+  tooken_model:
+    name: Модель Tooken Club
+    description: Начальный вариант gemini-3.8-flash. Можно указать другой ID с поддержкой Chat Completions из кабинета или /v1/models.
   panel_url:
     name: Адрес панели или секретная ссылка
     description: HTTPS-адрес своей панели. Можно вставить ссылку /auth/login?ключ=значение, чтобы получить cookie.
@@ -24,4 +33,4 @@ configuration:
     description: Включено — проверяет доступ и выводит анекдот в журнал, НЕ меняя панель. Выключите после проверки и перезапустите дополнение.
   examples:
     name: Примеры анекдотов
-    description: Замените на свои примеры. Они остаются на вашем устройстве и передаются только локальной модели.
+    description: Примеры стиля, не обучение. В режиме local остаются на устройстве; в режиме tooken отправляются Tooken Club вместе с несколькими недавними анекдотами.
