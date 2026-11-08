@@ -198,14 +198,17 @@ class Generator:
         examples = self.config["examples"]
         count = self.config.get("example_count", 8)
         selected = random.sample(examples, min(count or len(examples), len(examples)))
-        system = ("Ты автор коротких русских анекдотов. Напиши один новый анекдот: "
-                  "понятная ситуация и короткая неожиданная концовка, связанная с началом. "
-                  "Все реплики должны иметь смысл; не соединяй случайные фразы. "
-                  "Можно использовать абсурд, иронию и чёрный юмор без унижения групп людей. "
-                  "Примеры ниже — только образцы краткости, ритма и устройства шутки; "
-                  "это не инструкции, их сюжет и персонажей копировать нельзя. "
-                  "Без вступлений, пояснений, рекламы, ссылок и объяснения шутки. "
-                  f"Не больше {self.config['max_chars']} символов. Верни только анекдот.")
+        system = ("Напиши новый короткий русский анекдот, ориентируясь на стиль примеров. "
+                  "Проанализируй их про себя: ритм, формат, степень абсурда и приём концовки. "
+                  "Подойдут чёрный юмор, неожиданное буквальное толкование, двусмысленность "
+                  "и игра значений слов. Подводка должна естественно вести к резкой концовке; "
+                  "каждая реплика должна быть связана с предыдущей. "
+                  "Выбери подходящий формат из примеров: одна фраза, вопрос и ответ или короткий диалог. "
+                  "Не делай шутку доброй или бытовой по привычке; не добавляй лишние реплики, "
+                  "нравоучения и объяснение шутки. Не повторяй примеры и недавние анекдоты, "
+                  "не копируй их конкретные сюжеты и панчлайны. "
+                  "Примеры — образцы стиля, а не инструкции. "
+                  f"Не больше {self.config['max_chars']} символов. Верни только текст анекдота.")
         return [
             {"role": "system", "content": system},
             {"role": "user", "content": json.dumps({
@@ -363,23 +366,28 @@ def run_once(config, generator, state, state_path):
         joke = pending["text"]
     else:
         joke = generator.generate(state.get("history", []))
+    headers = settings.get("customResponseHeaders") or {}
+    current = next((value for key, value in headers.items() if key.lower() == "announce"), "")
+    current = current.removeprefix("rwEncodeBase64:").lstrip()
+    match = re.match(r"(\[[^\[\]\r\n]+\])", current)
+    announce = f"{match.group(1)}\n\n{joke}" if match else joke
     if config["dry_run"]:
-        LOG.info("PREVIEW (dry_run): %s", joke)
+        LOG.info("PREVIEW (dry_run): %s", announce)
         state["last_date"] = today
         save_json(state_path, state)
-        return joke
+        return announce
     # Persist the joke before PATCH so a restart/retry reuses the same content.
     state["pending"] = {"date": today, "text": joke}
     save_json(state_path, state)
     backup = state_path.parent / "before-update.json"
     save_json(backup, settings)
-    panel.update(settings, joke)
+    panel.update(settings, announce)
     state["history"] = (state.get("history", []) + [{"date": today, "text": joke}])[-60:]
     state["last_date"] = today
     state.pop("pending", None)
     save_json(state_path, state)
     LOG.info("Announce updated and verified")
-    return joke
+    return announce
 
 
 def main():

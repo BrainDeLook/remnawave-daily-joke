@@ -306,6 +306,29 @@ class StateTests(unittest.TestCase):
                          self.panel.get.return_value)
         self.assertFalse(self.path.with_suffix(".tmp").exists())
 
+    def test_preserves_leading_bracketed_announcement_in_publish_and_preview(self):
+        for old in ("rwEncodeBase64: [Финляндия снова работает]\n\nСтарый анекдот",
+                    "[Финляндия снова работает]\n\nСтарый анекдот"):
+            for preview in (False, True):
+                with self.subTest(old=old, preview=preview):
+                    self.panel.reset_mock()
+                    self.panel.get.return_value = {"uuid": "id", "customResponseHeaders": {"Announce": old}}
+                    state = {}
+                    result = app.run_once(configuration(dry_run=preview), self.generator, state, self.path)
+                    expected = "[Финляндия снова работает]\n\nНовая шутка дня"
+                    self.assertEqual(result, expected)
+                    if preview:
+                        self.panel.update.assert_not_called()
+                    else:
+                        self.panel.update.assert_called_once_with(self.panel.get.return_value, expected)
+                        self.assertEqual(state["history"][-1]["text"], "Новая шутка дня")
+
+    def test_brackets_inside_old_joke_are_not_preserved(self):
+        self.panel.get.return_value = {"uuid": "id", "customResponseHeaders": {
+            "announce": "rwEncodeBase64:Старая шутка [с примечанием]"}}
+        result = app.run_once(configuration(), self.generator, {}, self.path)
+        self.assertEqual(result, "Новая шутка дня")
+
     def test_failed_update_persists_pending_and_retry_reuses_same_joke(self):
         state = {}
 
