@@ -10,7 +10,8 @@ from test_app import configuration, FakeOpener, fake_timezone
 
 
 def response(text="Купил будильник с характером. Теперь он обижается, когда его завожу.", **changes):
-    result = {"choices": [{"finish_reason": "stop", "message": {"content": text}}],
+    output = json.dumps({"candidates": [text, "Вторая новая шутка", "Третья новая шутка"], "choice": 1}, ensure_ascii=False)
+    result = {"choices": [{"finish_reason": "stop", "message": {"content": output}}],
               "usage": {"prompt_tokens": 1100, "completion_tokens": 60, "total_tokens": 1160}}
     result.update(changes)
     return result
@@ -36,7 +37,7 @@ class TookenTests(unittest.TestCase):
         self.assertIsNone(request.get_header("Cookie"))
         body = json.loads(request.data)
         self.assertEqual(body["model"], "gemini-3.8-flash")
-        self.assertEqual(body["max_tokens"], 512)
+        self.assertEqual(body["max_tokens"], 2048)
         self.assertNotIn("api_key", json.dumps(body))
         self.assertNotIn("panel.invalid", json.dumps(body))
         self.assertNotIn("keep_alive", body)
@@ -59,11 +60,28 @@ class TookenTests(unittest.TestCase):
         self.assertTrue(generator.generate([]))
         self.assertIsNone(generator.usage)
 
+    def test_review_selects_candidate_and_rejects_malformed_or_duplicate_options(self):
+        def payload(value):
+            return {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(value, ensure_ascii=False)}}]}
+
+        candidates = ["Первый анекдот", "Второй анекдот", "Третий анекдот"]
+        generator, _ = self.generator(payload({"candidates": candidates, "choice": 2}))
+        self.assertEqual(generator.generate([]), candidates[1])
+        for value in ({"candidates": candidates, "choice": 0},
+                      {"candidates": candidates, "choice": True},
+                      {"candidates": candidates[:2], "choice": 1},
+                      {"candidates": ["Один", "Один", "Два"], "choice": 1}):
+            with self.subTest(value=value):
+                generator, opener = self.generator(payload(value))
+                with self.assertRaises(app.SafeError):
+                    generator.generate([])
+                self.assertEqual(len(opener.requests), 1)
+
     def test_gpt_models_use_responses_without_temperature(self):
         for model, effort in [("gpt-6.1-terra", "none"), ("gpt-6.1-sol", "low")]:
             payload = {"status": "completed", "usage": {"input_tokens": 1500, "output_tokens": 150},
                        "output": [{"type": "reasoning", "summary": []},
-                                  {"type": "message", "content": [{"type": "output_text", "text": "Новый анекдот на русском"}]}]}
+                                  {"type": "message", "content": [{"type": "output_text", "text": json.dumps({"candidates": ["Новый анекдот на русском", "Вторая шутка", "Третья шутка"], "choice": 1}, ensure_ascii=False)}]}]}
             generator, opener = self.generator(payload)
             generator.config["tooken_model"] = model
             with self.subTest(model=model):
@@ -73,7 +91,7 @@ class TookenTests(unittest.TestCase):
                 body = json.loads(request.data)
                 self.assertNotIn("temperature", body)
                 self.assertNotIn("max_tokens", body)
-                self.assertEqual(body["max_output_tokens"], 1024)
+                self.assertEqual(body["max_output_tokens"], 2048)
                 self.assertEqual(body["reasoning"]["effort"], effort)
                 self.assertFalse(body["store"])
                 self.assertEqual(generator.usage, {"input": 1500, "output": 150})

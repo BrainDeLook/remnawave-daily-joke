@@ -359,8 +359,19 @@ class StateTests(unittest.TestCase):
         state = {}
         app.run_once(configuration(dry_run=True), self.generator, state, self.path)
         self.panel.update.assert_not_called()
-        self.assertEqual(self.read_state(), {"last_date": "2026-11-07"})
+        self.assertEqual(self.read_state(), {"last_date": "2026-11-07", "preview_history": [
+            {"date": "2026-11-07", "text": "Новая шутка дня"}]})
         self.assertFalse((self.path.parent / "before-update.json").exists())
+
+    def test_preview_history_is_sent_on_next_preview_and_bounded(self):
+        state = {"history": [{"text": "Опубликованный анекдот"}]}
+        for text in ("Первая шутка", "Вторая шутка", "Третья шутка", "Четвёртая шутка"):
+            self.generator.generate.return_value = text
+            app.run_once(configuration(dry_run=True), self.generator, state, self.path)
+        self.assertEqual([x["text"] for x in state["preview_history"]],
+                         ["Вторая шутка", "Третья шутка", "Четвёртая шутка"])
+        self.assertEqual([x["text"] for x in self.generator.generate.call_args.args[0]],
+                         ["Опубликованный анекдот", "Первая шутка", "Вторая шутка", "Третья шутка"])
 
     def test_dry_run_reuses_pending_without_generating(self):
         state = {"pending": {"date": "2026-11-07", "text": "Уже выбранная шутка"}}

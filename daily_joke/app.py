@@ -250,20 +250,24 @@ class TookenGenerator(Generator):
         self.usage = None
         messages = self.joke_messages(history)
         messages[0]["content"] += (
-            " Про себя сравни варианты и выбери тот, где подводка и панчлайн связаны, "
-            "а поворот понятен и неожиданен. Покажи только итоговый анекдот.")
+            " Придумай три разных законченных варианта на разные темы, с разными ситуациями "
+            "и персонажами. Сравни их по связности, чёрному юмору, концовке и стилю примеров. "
+            "Вместо текста анекдота верни JSON без markdown: "
+            '{"candidates":["первый", "второй", "третий"], "choice":1}. '
+            "choice — номер лучшего варианта от 1 до 3, или 0, если все неудачны. "
+            "Не добавляй пояснений и не изменяй выбранный вариант.")
         model = self.config["tooken_model"]
         responses_api = model.startswith("gpt-")
         if responses_api:
             endpoint = "responses"
             body = {"model": model, "input": messages, "stream": False, "store": False,
-                    "max_output_tokens": 1024,
+                    "max_output_tokens": 2048,
                     "reasoning": {"effort": "none" if model == "gpt-6.1-terra" else "low"}}
             usage_keys = ("input_tokens", "output_tokens")
         else:
             endpoint = "chat/completions"
             body = {"model": model, "messages": messages, "stream": False,
-                    "max_tokens": 512, "temperature": 0.8}
+                    "max_tokens": 2048, "temperature": 0.8}
             usage_keys = ("prompt_tokens", "completion_tokens")
         response = http_json(self.opener, "https://tooken.club/v1/" + endpoint, "POST", body,
                              {"Authorization": "Bearer " + self.config["tooken_api_key"]}, timeout=180)
@@ -310,7 +314,20 @@ class TookenGenerator(Generator):
             if choice.get("finish_reason") != "stop":
                 raise SafeError("Tooken response incomplete or refused; old announce retained")
             text = message["content"]
-        joke = valid_joke(text, self.config["examples"], history, self.config["max_chars"])
+        try:
+            selection = json.loads(text)
+        except ValueError:
+            raise SafeError("Invalid Tooken candidate JSON; old announce retained") from None
+        if not isinstance(selection, dict) or not isinstance(selection.get("candidates"), list):
+            raise SafeError("Invalid Tooken candidates; old announce retained")
+        candidates = selection["candidates"]
+        choice = selection.get("choice")
+        if (len(candidates) != 3 or any(not isinstance(item, str) for item in candidates)
+                or type(choice) is not int or not 1 <= choice <= 3):
+            raise SafeError("Invalid Tooken review choice; old announce retained")
+        if len({normalized(item) for item in candidates}) != 3:
+            raise SafeError("Tooken returned duplicate candidates; old announce retained")
+        joke = valid_joke(candidates[choice - 1], self.config["examples"], history, self.config["max_chars"])
         if joke is None:
             raise SafeError("Tooken returned invalid or repeated joke; old announce retained")
         return joke
@@ -373,7 +390,10 @@ def run_once(config, generator, state, state_path):
         generator.usage = None
         joke = pending["text"]
     else:
-        joke = generator.generate(state.get("history", []))
+        history = state.get("history", [])
+        if config["dry_run"]:
+            history = history + state.get("preview_history", [])
+        joke = generator.generate(history)
     headers = settings.get("customResponseHeaders") or {}
     current = next((value for key, value in headers.items() if key.lower() == "announce"), "")
     current = current.removeprefix("rwEncodeBase64:").lstrip()
@@ -381,6 +401,7 @@ def run_once(config, generator, state, state_path):
     announce = f"{match.group(1)}\n\n{joke}" if match else joke
     if config["dry_run"]:
         LOG.info("PREVIEW (dry_run): %s", announce)
+        state["preview_history"] = (state.get("preview_history", []) + [{"date": today, "text": joke}])[-3:]
         state["last_date"] = today
         save_json(state_path, state)
         return announce
