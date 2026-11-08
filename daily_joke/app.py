@@ -196,7 +196,8 @@ class Generator:
 
     def joke_messages(self, history, candidates=()):
         examples = self.config["examples"]
-        selected = random.sample(examples, min(8, len(examples)))
+        count = self.config.get("example_count", 8)
+        selected = random.sample(examples, min(count or len(examples), len(examples)))
         system = ("Ты автор коротких русских анекдотов. Напиши один новый анекдот: "
                   "понятная ситуация и короткая неожиданная концовка, связанная с началом. "
                   "Все реплики должны иметь смысл; не соединяй случайные фразы. "
@@ -333,6 +334,10 @@ def load_config(path):
     if hour > 23 or minute > 59:
         raise SafeError("daily_time must be a valid time from 00:00 to 23:59")
     ZoneInfo(config["timezone"])
+    count = config.get("example_count", 8)
+    if type(count) is not int or not 0 <= count <= 10000:
+        raise SafeError("example_count must be an integer from 0 to 10000")
+    config["example_count"] = count
     examples = config["examples"]
     if not isinstance(examples, list) or not examples or any(
             not isinstance(e, str) or not e.strip() or len(e) > 1200 for e in examples):

@@ -20,6 +20,7 @@ def configuration(**changes):
         "daily_time": "09:30",
         "timezone": "UTC",
         "examples": ["Пример старого анекдота."],
+        "example_count": 8,
         "max_chars": 240,
         "model": "test-model",
         "dry_run": False,
@@ -37,6 +38,19 @@ class FakeOpener:
         self.requests.append(request)
         return io.BytesIO(json.dumps(next(self.responses), ensure_ascii=False).encode("utf-8"))
 
+
+class ExampleCountTests(unittest.TestCase):
+    def test_selected_count_and_all_share_prompt_for_both_generators(self):
+        examples = [f"Анекдот номер {i}" for i in range(12)]
+        for generator_class in (app.Generator, app.TookenGenerator):
+            for count, expected in ((3, 3), (0, 12), (20, 12)):
+                with self.subTest(generator=generator_class.__name__, count=count):
+                    generator = generator_class(configuration(examples=examples, example_count=count))
+                    messages = generator.joke_messages([])
+                    selected = json.loads(messages[1]["content"])["style_examples"]
+                    self.assertEqual(len(selected), expected)
+                    self.assertEqual(len(set(selected)), expected)
+                    self.assertTrue(set(selected).issubset(examples))
 
 class PanelTests(unittest.TestCase):
     def test_update_preserves_other_headers_uuid_and_utf8(self):
@@ -154,6 +168,7 @@ class ConfigTests(unittest.TestCase):
     def test_malformed_config_is_denied(self):
         cases = [{"daily_time": "9:30"}, {"daily_time": "24:00"},
                  {"daily_time": "09:60"}, {"timezone": "Not/A_Timezone"},
+                 {"example_count": -1}, {"example_count": True}, {"example_count": "all"},
                  {"examples": []}, {"examples": [""]}, {"examples": [42]},
                  {"examples": ["я" * 1201]}, {"examples": "это не список"},
                  {"max_chars": 79}, {"max_chars": 1001}, {"api_key": " "},
